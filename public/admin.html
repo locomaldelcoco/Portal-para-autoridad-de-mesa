@@ -28,7 +28,10 @@
           <label>Fecha<input name="fecha" type="date" required><span class="err"></span></label>
           <label>Horario<input name="horario" type="time" required><span class="err"></span></label>
           <label>Nombre de la sede<input name="sedeNombre" required><span class="err"></span></label>
-          <label>Dirección de la sede<input name="sedeDireccion" required><span class="err"></span></label>
+          <label class="autocompletar">Dirección de la sede
+            <input name="sedeDireccion" id="direccion" required autocomplete="off" role="combobox" aria-expanded="false" aria-controls="opciones">
+            <ul id="opciones" role="listbox" hidden></ul>
+            <span class="ayuda" id="direccion-ayuda"></span><span class="err"></span></label>
           <div class="acciones"><button type="submit">Publicar</button></div>
         </form>
         <div id="charla-msg"></div>
@@ -77,6 +80,60 @@
       }
     });
 
+    // Sugerencias de direcciones (servicio de mapas): se ofrecen opciones mientras se escribe
+    const AYUDA = 'Escribí y elegí una opción de la lista para normalizar la dirección.';
+    const dir = $('direccion'), lista = $('opciones'), ayuda = $('direccion-ayuda');
+    let opciones = [], activa = -1, busqueda = 0, temporizador;
+    ayuda.textContent = AYUDA;
+
+    const cerrar = () => { lista.hidden = true; dir.setAttribute('aria-expanded', 'false'); activa = -1; };
+    function pintar() {
+      lista.innerHTML = opciones.map((o, i) => `<li role="option" data-i="${i}"${i === activa ? ' aria-selected="true"' : ''}>
+        <strong>${esc(o.direccion)}</strong>${o.localidad ? ` <small>${esc(o.localidad)}</small>` : ''}</li>`).join('');
+      lista.hidden = !opciones.length;
+      dir.setAttribute('aria-expanded', String(opciones.length > 0));
+    }
+    function elegir(i) {
+      const o = opciones[i];
+      if (!o) return;
+      const incluye = o.localidad && o.direccion.toLowerCase().includes(o.localidad.toLowerCase());
+      dir.value = o.localidad && !incluye ? `${o.direccion}, ${o.localidad}` : o.direccion;
+      cerrar();
+      ayuda.textContent = '✔ Dirección normalizada';
+    }
+    dir.addEventListener('input', () => {
+      clearTimeout(temporizador);
+      ayuda.textContent = AYUDA;
+      const q = dir.value.trim();
+      if (q.length < 3) { opciones = []; pintar(); return; }
+      temporizador = setTimeout(async () => {
+        const n = ++busqueda; // descarta respuestas viejas si ya se siguió escribiendo
+        try {
+          const r = await api('/api/direcciones?q=' + encodeURIComponent(q), {}, auth);
+          if (n !== busqueda) return;
+          opciones = r; activa = -1; pintar();
+          if (!r.length) ayuda.textContent = 'Sin sugerencias: revisá la dirección o dejala como la escribiste.';
+        } catch (e) {
+          if (n !== busqueda) return;
+          opciones = []; pintar(); ayuda.textContent = e.message;
+        }
+      }, 300);
+    });
+    dir.addEventListener('keydown', (ev) => {
+      if (lista.hidden) return;
+      if (ev.key === 'ArrowDown') { activa = (activa + 1) % opciones.length; pintar(); ev.preventDefault(); }
+      else if (ev.key === 'ArrowUp') { activa = (activa - 1 + opciones.length) % opciones.length; pintar(); ev.preventDefault(); }
+      else if (ev.key === 'Enter' && activa >= 0) { elegir(activa); ev.preventDefault(); }
+      else if (ev.key === 'Escape') cerrar();
+    });
+    dir.addEventListener('blur', cerrar);
+    // mousedown (y no click) para elegir antes de que el input pierda el foco
+    lista.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      const li = ev.target.closest('li');
+      if (li) elegir(Number(li.dataset.i));
+    });
+
     // RF-01
     $('form-charla').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -85,7 +142,7 @@
       const dto = Object.fromEntries(new FormData(f));
       try {
         await api('/api/charlas', { method: 'POST', body: JSON.stringify(dto) }, auth);
-        f.reset(); mostrar($('charla-msg'), 'Charla publicada', 'ok');
+        f.reset(); ayuda.textContent = AYUDA; mostrar($('charla-msg'), 'Charla publicada', 'ok');
       } catch (e) {
         mostrar($('charla-msg'), e.message, 'error');
         for (const [campo, m] of Object.entries(e.campos)) {

@@ -7,6 +7,7 @@ import { crearCifrado } from './cifrado.js';
 import { crearConvocatoria } from './convocatoria.js';
 import { crearCorreo } from './correo.js';
 import { abrirDb } from './db.js';
+import { buscarDirecciones as usig } from './direcciones.js';
 import { DISTRITOS } from './distritos.js';
 import { HttpError } from './errores.js';
 import { crearPostulantes, crearRepositorioPostulantes } from './postulantes.js';
@@ -23,7 +24,7 @@ const igual = (a, b) => {
  * Arma toda la aplicación. `reloj` devuelve la hora argentina como AAAA-MM-DDTHH:MM:SS y
  * `transporte` es el servidor de correo (nodemailer); ambos se inyectan para poder probar.
  */
-export function crearApp({ config, reloj, transporte }) {
+export function crearApp({ config, reloj, transporte, buscarDirecciones = usig }) {
   const db = abrirDb(config.dbRuta);
   const cifrado = crearCifrado(config.claveCifrado);
   const correo = crearCorreo({ db, reloj, remitente: config.remitente, transporte });
@@ -53,6 +54,17 @@ export function crearApp({ config, reloj, transporte }) {
 
   // RNF-03: administrador
   app.post('/api/charlas', soloAdmin, (req, res) => res.status(201).json(charlas.publicar(req.body)));
+  // Sugerencias de direcciones (servicio de mapas externo) para el formulario de charlas
+  app.get('/api/direcciones', soloAdmin, async (req, res) => {
+    const q = String(req.query.q ?? '').trim().slice(0, 100);
+    if (q.length < 3) return res.json([]);
+    try {
+      res.json(await buscarDirecciones(q));
+    } catch (e) {
+      console.warn('Servicio de direcciones no disponible:', e.message);
+      throw new HttpError(502, 'El servicio de direcciones no está disponible. Podés escribir la dirección manualmente.');
+    }
+  });
   app.get('/api/postulantes', soloAdmin, (_req, res) => res.json(postulantes.consultar()));
   app.get('/api/postulantes/:id', soloAdmin, (req, res) => res.json(postulantes.obtener(Number(req.params.id))));
   app.post('/api/postulantes/:id/aprobar', soloAdmin, (req, res) => res.json(postulantes.aprobar(Number(req.params.id))));

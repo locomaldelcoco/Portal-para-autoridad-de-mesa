@@ -3,6 +3,7 @@ import { after, before, test } from 'node:test';
 import crypto from 'node:crypto';
 import { crearApp } from '../server/app.js';
 import { telefonoArgentino } from '../server/postulantes.js';
+import { buscarDirecciones } from '../server/direcciones.js';
 
 const ADMIN = 'Basic ' + Buffer.from('admin:cambiar-esto').toString('base64');
 const CHARLA = {
@@ -25,6 +26,10 @@ before(async () => {
     },
     reloj: () => ahora,
     transporte: { sendMail: async (m) => { enviados.push(m); } },
+    buscarDirecciones: async (q) => {
+      if (q === 'caido') throw new Error('sin red');
+      return [{ direccion: `${q.toUpperCase()} 123`, localidad: 'CABA' }];
+    },
   });
   servidor = portal.app.listen(0);
   base = `http://localhost:${servidor.address().port}`;
@@ -121,4 +126,29 @@ test('si el servidor de correo falla, el correo queda pendiente y se reintenta',
   await caido.correo.enviarPendientes();
   const c = caido.db.prepare('SELECT estado, intentos, ultimo_error FROM correo').get();
   assert.equal(c.estado, 'PENDIENTE'); assert.equal(c.intentos, 1); assert.match(c.ultimo_error, /SMTP caído/);
+});
+
+test('sugerencias de direcciones: solo admin, mínimo 3 letras y falla controlada', async () => {
+  assert.equal((await llamar('GET', '/api/direcciones?q=corrientes')).status, 401);
+  assert.deepEqual((await llamar('GET', '/api/direcciones?q=co', { admin: true })).datos, []);
+  const r = await llamar('GET', '/api/direcciones?q=corrientes', { admin: true });
+  assert.equal(r.status, 200); assert.equal(r.datos[0].direccion, 'CORRIENTES 123');
+  const caido = await llamar('GET', '/api/direcciones?q=caido', { admin: true });
+  assert.equal(caido.status, 502); assert.match(caido.datos.mensaje, /manualmente/);
+});
+
+test('buscarDirecciones interpreta la respuesta de la USIG y pide los parámetros correctos', async () => {
+  let pedida;
+  const falsoFetch = async (url) => {
+    pedida = url;
+    return { ok: true, json: async () => ({ direccionesNormalizadas: [
+      { direccion: 'CORRIENTES AV. 123', nombre_localidad: 'CABA', coordenadas: { x: '-58.37', y: '-34.60' } },
+      { calle: 'sin campo direccion' },
+    ] }) };
+  };
+  const r = await buscarDirecciones('corrientes 123', falsoFetch);
+  assert.deepEqual(r, [{ direccion: 'CORRIENTES AV. 123', localidad: 'CABA' }]);
+  assert.equal(pedida.hostname, 'servicios.usig.buenosaires.gob.ar');
+  assert.equal(pedida.searchParams.get('direccion'), 'corrientes 123');
+  await assert.rejects(buscarDirecciones('x', async () => ({ ok: false, status: 500 })), /500/);
 });

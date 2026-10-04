@@ -32,6 +32,7 @@ npm test
 |---|---|
 | RF-01 Publicar charlas | `POST /api/charlas` (admin) · `server/charlas.js` |
 | RF-02 Ver charlas, RNF-01 mapa | `GET /api/charlas` · `public/index.html` |
+| RNF-01 Sugerencias de direcciones al publicar una charla | `GET /api/direcciones?q=` (admin) · `server/direcciones.js` consulta el normalizador de la USIG |
 | RF-03 / RF-04 Habilitar / bloquear inscripción | `server/convocatoria.js` `estado()`: abre el día de la primera charla y cierra en fecha y hora de la última |
 | RF-05 Registro de postulación | `POST /api/postulantes` · `server/postulantes.js` |
 | RF-06 / RF-07 / CU1 Reporte de cierre | `convocatoria.cerrarSiCorresponde` (tarea programada cada minuto) |
