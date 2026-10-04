@@ -3,7 +3,8 @@ import { after, before, test } from 'node:test';
 import crypto from 'node:crypto';
 import { crearApp } from '../server/app.js';
 import { telefonoArgentino } from '../server/postulantes.js';
-import { buscarDirecciones } from '../server/direcciones.js';
+import { crearServicioDirecciones } from '../server/direcciones.js';
+import { cargarEjemplo } from '../server/ejemplo.js';
 
 const ADMIN = 'Basic ' + Buffer.from('admin:cambiar-esto').toString('base64');
 const CHARLA = {
@@ -26,9 +27,15 @@ before(async () => {
     },
     reloj: () => ahora,
     transporte: { sendMail: async (m) => { enviados.push(m); } },
-    buscarDirecciones: async (q) => {
-      if (q === 'caido') throw new Error('sin red');
-      return [{ direccion: `${q.toUpperCase()} 123`, localidad: 'CABA' }];
+    direcciones: {
+      buscar: async (q) => {
+        if (q === 'caido') throw new Error('sin red');
+        return [{ direccion: `${q.toUpperCase()} 123`, localidad: 'CABA' }];
+      },
+      ubicar: async (q) => {
+        if (q === 'caido') throw new Error('sin red');
+        return q === 'nada' ? null : { direccion: q.toUpperCase(), localidad: 'CABA', lat: -34.6, lng: -58.38 };
+      },
     },
   });
   servidor = portal.app.listen(0);
@@ -137,18 +144,46 @@ test('sugerencias de direcciones: solo admin, mínimo 3 letras y falla controlad
   assert.equal(caido.status, 502); assert.match(caido.datos.mensaje, /manualmente/);
 });
 
-test('buscarDirecciones interpreta la respuesta de la USIG y pide los parámetros correctos', async () => {
+test('ubicación de una sede: es pública y falla de forma controlada', async () => {
+  const r = await llamar('GET', '/api/ubicacion?direccion=Corrientes 1530');
+  assert.equal(r.status, 200); assert.equal(r.datos.lat, -34.6); assert.equal(r.datos.lng, -58.38);
+  assert.equal((await llamar('GET', '/api/ubicacion?direccion=nada')).status, 404);
+  assert.equal((await llamar('GET', '/api/ubicacion?direccion=caido')).status, 502);
+  assert.equal((await llamar('GET', '/api/ubicacion?direccion=a')).status, 400);
+});
+
+test('la USIG: se envía la dirección y se interpretan las coordenadas de la respuesta', async () => {
   let pedida;
   const falsoFetch = async (url) => {
     pedida = url;
     return { ok: true, json: async () => ({ direccionesNormalizadas: [
-      { direccion: 'CORRIENTES AV. 123', nombre_localidad: 'CABA', coordenadas: { x: '-58.37', y: '-34.60' } },
+      { direccion: 'CORRIENTES AV. 123', nombre_localidad: 'CABA', coordenadas: { x: '99000', y: '100000' } }, // fuera de Argentina
+      { direccion: 'CORRIENTES AV. 1530', nombre_localidad: 'CABA', coordenadas: { x: '-58.3877', y: '-34.6037' } },
       { calle: 'sin campo direccion' },
     ] }) };
   };
-  const r = await buscarDirecciones('corrientes 123', falsoFetch);
-  assert.deepEqual(r, [{ direccion: 'CORRIENTES AV. 123', localidad: 'CABA' }]);
+  const usig = crearServicioDirecciones(falsoFetch);
+  assert.equal((await usig.buscar('corrientes')).length, 2);
   assert.equal(pedida.hostname, 'servicios.usig.buenosaires.gob.ar');
-  assert.equal(pedida.searchParams.get('direccion'), 'corrientes 123');
-  await assert.rejects(buscarDirecciones('x', async () => ({ ok: false, status: 500 })), /500/);
+  assert.equal(pedida.searchParams.get('geocodificar'), 'true');
+  const u = await usig.ubicar('corrientes 1530');
+  assert.deepEqual(u, { direccion: 'CORRIENTES AV. 1530', localidad: 'CABA', lat: -34.6037, lng: -58.3877 });
+  assert.equal(pedida.searchParams.get('direccion'), 'corrientes 1530');
+  await assert.rejects(crearServicioDirecciones(async () => ({ ok: false, status: 500 })).buscar('x'), /500/);
+});
+
+test('datos de ejemplo: escenario abierta y escenario cerrada', async () => {
+  for (const [escenario, estadoEsperado] of [['abierta', 'ABIERTA'], ['cerrada', 'CERRADA']]) {
+    ahora = '2099-05-10T10:00:00';
+    const p = crearApp({
+      config: { dbRuta: ':memory:', adminUsuario: 'a', adminPassword: 'b', adminEmail: 'e@x.com', remitente: 'r@x.com',
+        claveCifrado: crypto.randomBytes(32).toString('base64') },
+      reloj: () => ahora,
+    });
+    assert.equal(cargarEjemplo(p, escenario), true);
+    assert.equal(cargarEjemplo(p, escenario), false); // no se duplican
+    assert.equal(p.convocatoria.estado().estado, estadoEsperado);
+    assert.equal(p.db.prepare('SELECT COUNT(*) n FROM charla').get().n, 3);
+    assert.equal(p.repo.todos().length, 3);
+  }
 });

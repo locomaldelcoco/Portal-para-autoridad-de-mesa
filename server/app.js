@@ -7,9 +7,9 @@ import { crearCifrado } from './cifrado.js';
 import { crearConvocatoria } from './convocatoria.js';
 import { crearCorreo } from './correo.js';
 import { abrirDb } from './db.js';
-import { buscarDirecciones as usig } from './direcciones.js';
+import { crearServicioDirecciones } from './direcciones.js';
 import { DISTRITOS } from './distritos.js';
-import { HttpError } from './errores.js';
+import { HttpError, datoInvalido } from './errores.js';
 import { crearPostulantes, crearRepositorioPostulantes } from './postulantes.js';
 
 const publico = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public');
@@ -24,7 +24,7 @@ const igual = (a, b) => {
  * Arma toda la aplicación. `reloj` devuelve la hora argentina como AAAA-MM-DDTHH:MM:SS y
  * `transporte` es el servidor de correo (nodemailer); ambos se inyectan para poder probar.
  */
-export function crearApp({ config, reloj, transporte, buscarDirecciones = usig }) {
+export function crearApp({ config, reloj, transporte, direcciones = crearServicioDirecciones() }) {
   const db = abrirDb(config.dbRuta);
   const cifrado = crearCifrado(config.claveCifrado);
   const correo = crearCorreo({ db, reloj, remitente: config.remitente, transporte });
@@ -50,6 +50,20 @@ export function crearApp({ config, reloj, transporte, buscarDirecciones = usig }
   app.get('/api/charlas', (_req, res) => res.json(charlas.proximas()));
   app.get('/api/convocatoria', (_req, res) => res.json(convocatoria.estado()));
   app.get('/api/distritos', (_req, res) => res.json(DISTRITOS));
+  // Ubicación de una sede: la dirección se envía a la API de la USIG y la respuesta alimenta el mapa
+  app.get('/api/ubicacion', async (req, res) => {
+    const q = String(req.query.direccion ?? '').trim().slice(0, 150);
+    if (q.length < 3) throw datoInvalido('direccion', 'Indique una dirección');
+    let ubicacion;
+    try {
+      ubicacion = await direcciones.ubicar(q);
+    } catch (e) {
+      console.warn('Servicio de direcciones no disponible:', e.message);
+      throw new HttpError(502, 'El servicio de mapas no está disponible en este momento');
+    }
+    if (!ubicacion) throw new HttpError(404, 'No se pudo ubicar la dirección en el mapa');
+    res.json(ubicacion);
+  });
   app.post('/api/postulantes', (req, res) => res.status(201).json(postulantes.registrar(req.body)));
 
   // RNF-03: administrador
@@ -59,7 +73,7 @@ export function crearApp({ config, reloj, transporte, buscarDirecciones = usig }
     const q = String(req.query.q ?? '').trim().slice(0, 100);
     if (q.length < 3) return res.json([]);
     try {
-      res.json(await buscarDirecciones(q));
+      res.json(await direcciones.buscar(q));
     } catch (e) {
       console.warn('Servicio de direcciones no disponible:', e.message);
       throw new HttpError(502, 'El servicio de direcciones no está disponible. Podés escribir la dirección manualmente.');
@@ -86,7 +100,7 @@ export function crearApp({ config, reloj, transporte, buscarDirecciones = usig }
   });
 
   return {
-    app, correo, convocatoria, db,
+    app, correo, convocatoria, db, repo, reloj,
     /** Tareas periódicas: cierre de convocatoria (CU1) y envío/reintento de correos. */
     iniciarTareas(cadaMs = 60_000) {
       const cerrar = () => { try { convocatoria.cerrarSiCorresponde(); } catch (e) { console.error(e); } };

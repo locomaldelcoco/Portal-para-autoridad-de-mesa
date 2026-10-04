@@ -9,11 +9,25 @@ Solo JavaScript, HTML y CSS.
 - **Dependencias**: `express` y `nodemailer` (envío de correos).
 
 ## Ejecutar
+Requiere **Node.js 22.13 o superior** y conexión a internet (la API de la USIG y el mapa son servicios externos, sin claves).
 ```bash
-npm install
-npm start        # http://localhost:3000  (público)  |  /admin.html (administrador)
+npm install      # instala todas las dependencias (una sola vez)
+npm start        # http://localhost:3000  (público)  |  /admin.html (administrador: admin / cambiar-esto)
 npm test
 ```
+El prototipo trae **datos de ejemplo** (3 charlas y 3 postulantes) que se cargan solos en el primer arranque.
+
+| Comando | Escenario |
+|---|---|
+| `npm start` | Convocatoria **abierta**: ver charlas, ver el mapa de cada sede e inscribirse |
+| `npm run start:cerrada` | Convocatoria **cerrada**: en `/admin.html` consultar, aprobar y rechazar los postulantes |
+
+Cada escenario usa su propia base de datos en `data/`. Para reiniciarlos, detener el servidor y borrar esa carpeta.
+
+## Mapa (API de la USIG)
+Al tocar "Ver mapa", el backend envía la dirección de la sede a `servicios.usig.buenosaires.gob.ar/normalizar`
+y las coordenadas de la respuesta se usan para mostrar la ubicación (no hay coordenadas cargadas de antemano).
+Para probar otra dirección: en `/admin.html` publicar una charla y elegir la dirección entre las sugerencias.
 
 ## Configuración (variables de entorno)
 | Variable | Uso |

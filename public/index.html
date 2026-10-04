@@ -60,13 +60,22 @@
     } catch (e) {
       $('lista-charlas').innerHTML = '<div class="msg error">No se pudo mostrar el contenido. Intente nuevamente en otro momento.</div>';
     }
-    $('lista-charlas').addEventListener('click', (ev) => {
+    // El mapa se arma con la respuesta de la API de la USIG: se envía la dirección de la sede y se usan las coordenadas devueltas
+    $('lista-charlas').addEventListener('click', async (ev) => {
       const id = ev.target.dataset.mapa;
       if (!id) return;
-      const c = charlas.find(x => x.id == id);
       const cont = $('mapa-' + id);
-      cont.innerHTML = cont.innerHTML ? '' :
-        `<iframe title="Mapa de la sede" loading="lazy" src="https://maps.google.com/maps?q=${encodeURIComponent(c.sedeNombre + ', ' + c.sedeDireccion)}&output=embed"></iframe>`;
+      if (cont.innerHTML) { cont.innerHTML = ''; return; }
+      const c = charlas.find(x => x.id == id);
+      cont.innerHTML = '<p class="meta">Ubicando la sede…</p>';
+      try {
+        const u = await api('/api/ubicacion?direccion=' + encodeURIComponent(c.sedeDireccion));
+        const bbox = [u.lng - 0.004, u.lat - 0.002, u.lng + 0.004, u.lat + 0.002].join(',');
+        cont.innerHTML = `<p class="meta">Dirección normalizada: <strong>${esc(u.direccion)}</strong>${u.localidad ? ', ' + esc(u.localidad) : ''}
+            · <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${u.lat}&mlon=${u.lng}#map=17/${u.lat}/${u.lng}">Agrandar</a></p>
+          <iframe title="Mapa de la sede" loading="lazy"
+            src="https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${u.lat},${u.lng}"></iframe>`;
+      } catch (e) { cont.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
     });
 
     // --- RF-03 / RF-04: el formulario solo aparece con la convocatoria abierta ---
