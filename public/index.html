@@ -9,14 +9,9 @@
 <body>
   <header>
     <h1>Portal para Autoridades de Mesa</h1>
-    <nav><a href="#charlas">Charlas</a><a href="#inscripcion">Inscripción</a><a href="admin.html">Administración</a></nav>
+    <nav><a href="#inscripcion">Inscripción</a><a href="#charlas">Charlas</a><a href="admin.html">Administración</a></nav>
   </header>
-  <main>
-    <section id="charlas">
-      <h2>Charlas de orientación</h2>
-      <div id="lista-charlas">Cargando…</div>
-    </section>
-
+  <main class="dos-columnas">
     <section id="inscripcion">
       <h2>Inscripción como autoridad de mesa</h2>
       <div id="estado"></div>
@@ -37,6 +32,11 @@
         <div class="acciones"><button type="submit">Inscribirme</button></div>
       </form>
       <div id="resultado" role="status"></div>
+    </section>
+
+    <section id="charlas">
+      <h2>Charlas de orientación</h2>
+      <div id="lista-charlas">Cargando…</div>
     </section>
   </main>
 

@@ -33,3 +33,19 @@ dl { display:grid; grid-template-columns:max-content 1fr; gap:.2rem 1rem; } dt {
 .autocompletar li:hover, .autocompletar li[aria-selected="true"] { background:#e3ecf8; }
 .autocompletar small { color:#555; }
 .ayuda { font-size:.8rem; color:#555; font-weight:normal; }
+
+/* Página principal: formulario a la izquierda, charlas a la derecha */
+main.dos-columnas { max-width:1200px; display:grid; grid-template-columns:minmax(0,5fr) minmax(0,6fr); gap:1.5rem; align-items:start; }
+main.dos-columnas section { margin-bottom:0; }
+#inscripcion { position:sticky; top:1rem; max-height:calc(100vh - 2rem); overflow-y:auto; }
+#charlas .charla { border-left:4px solid var(--azul); }
+#charlas .charla button { margin-top:.6rem; padding:.45rem 1rem; }
+header { box-shadow:0 2px 6px rgba(0,0,0,.15); }
+nav a { text-decoration:none; padding:.3rem .6rem; border-radius:4px; }
+nav a:hover { background:rgba(255,255,255,.18); }
+@media (max-width: 900px) {
+  main.dos-columnas { grid-template-columns:1fr; }
+  #inscripcion { position:static; max-height:none; overflow:visible; }
+}
+#inscripcion form { grid-template-columns:repeat(auto-fit, minmax(200px, 1fr)); }
+[hidden] { display:none !important; }
