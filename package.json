@@ -1,0 +1,16 @@
+{
+  "name": "portal-autoridad-de-mesa",
+  "version": "0.2.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22.13" },
+  "scripts": {
+    "start": "node --no-warnings server/index.js",
+    "start:cerrada": "node --no-warnings server/index.js --ejemplo=cerrada",
+    "test": "node --no-warnings --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "nodemailer": "^7.0.0"
+  }
+}

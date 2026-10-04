@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administración — Portal para Autoridades de Mesa</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header><h1>Administración</h1><nav><a href="index.html">← Volver al portal</a></nav></header>
+  <main>
+    <section id="login">
+      <h2>Ingresar</h2>
+      <form id="form-login">
+        <label>Usuario<input name="usuario" required autocomplete="username"></label>
+        <label>Contraseña<input name="clave" type="password" required autocomplete="current-password"></label>
+        <div class="acciones"><button type="submit">Entrar</button></div>
+      </form>
+      <div id="login-msg"></div>
+    </section>
+
+    <div id="panel" hidden>
+      <section>
+        <h2>Publicar charla</h2>
+        <form id="form-charla">
+          <label>Nombre de la charla<input name="nombre" required><span class="err"></span></label>
+          <label>Tema<input name="tema" required><span class="err"></span></label>
+          <label>Fecha<input name="fecha" type="date" required><span class="err"></span></label>
+          <label>Horario<input name="horario" type="time" required><span class="err"></span></label>
+          <label>Nombre de la sede<input name="sedeNombre" required><span class="err"></span></label>
+          <label class="autocompletar">Dirección de la sede
+            <input name="sedeDireccion" id="direccion" required autocomplete="off" role="combobox" aria-expanded="false" aria-controls="opciones">
+            <ul id="opciones" role="listbox" hidden></ul>
+            <span class="ayuda" id="direccion-ayuda"></span><span class="err"></span></label>
+          <div class="acciones"><button type="submit">Publicar</button></div>
+        </form>
+        <div id="charla-msg"></div>
+      </section>
+
+      <section>
+        <h2>Postulantes</h2>
+        <div id="postulantes-msg"></div>
+        <div class="scroll"><table id="tabla" hidden>
+          <thead><tr><th>Apellido y nombre</th><th>Distrito</th><th>Estado</th><th></th></tr></thead>
+          <tbody id="postulantes"></tbody>
+        </table></div>
+      </section>
+
+      <section id="detalle" hidden>
+        <h2>Evaluar postulante</h2>
+        <dl id="datos"></dl>
+        <div id="acciones" hidden>
+          <button type="button" class="ok" id="aprobar">Aprobar</button>
+          <button type="button" class="peligro" id="rechazar">Rechazar</button>
+          <label style="margin-top:.8rem">Motivo del rechazo (obligatorio para rechazar)<textarea id="motivo" rows="3"></textarea></label>
+        </div>
+        <div id="detalle-msg"></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, esc, basicAuth } from './app.js';
+    const $ = (id) => document.getElementById(id);
+    const mostrar = (el, texto, tipo) => { el.className = 'msg ' + tipo; el.textContent = texto; };
+    let auth = null, seleccionado = null;
+
+    $('form-login').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      auth = basicAuth(f.usuario.value, f.clave.value);
+      try {
+        // Credenciales incorrectas -> 401. Que la convocatoria siga abierta (409) no impide entrar.
+        await api('/api/postulantes', {}, auth).catch(e => { if (e.status === 401 || e.status === 403) throw e; });
+        $('login').hidden = true; $('panel').hidden = false;
+        await cargarPostulantes();
+      } catch (e) {
+        auth = null;
+        mostrar($('login-msg'), e.status === 401 ? 'Usuario o contraseña incorrectos' : e.message, 'error');
+      }
+    });
+
+    // Sugerencias de direcciones (servicio de mapas): se ofrecen opciones mientras se escribe
+    const AYUDA = 'Escribí y elegí una opción de la lista para normalizar la dirección.';
+    const dir = $('direccion'), lista = $('opciones'), ayuda = $('direccion-ayuda');
+    let opciones = [], activa = -1, busqueda = 0, temporizador;
+    ayuda.textContent = AYUDA;
+
+    const cerrar = () => { lista.hidden = true; dir.setAttribute('aria-expanded', 'false'); activa = -1; };
+    function pintar() {
+      lista.innerHTML = opciones.map((o, i) => `<li role="option" data-i="${i}"${i === activa ? ' aria-selected="true"' : ''}>
+        <strong>${esc(o.direccion)}</strong>${o.localidad ? ` <small>${esc(o.localidad)}</small>` : ''}</li>`).join('');
+      lista.hidden = !opciones.length;
+      dir.setAttribute('aria-expanded', String(opciones.length > 0));
+    }
+    function elegir(i) {
+      const o = opciones[i];
+      if (!o) return;
+      const incluye = o.localidad && o.direccion.toLowerCase().includes(o.localidad.toLowerCase());
+      dir.value = o.localidad && !incluye ? `${o.direccion}, ${o.localidad}` : o.direccion;
+      cerrar();
+      ayuda.textContent = '✔ Dirección normalizada';
+    }
+    dir.addEventListener('input', () => {
+      clearTimeout(temporizador);
+      ayuda.textContent = AYUDA;
+      const q = dir.value.trim();
+      if (q.length < 3) { opciones = []; pintar(); return; }
+      temporizador = setTimeout(async () => {
+        const n = ++busqueda; // descarta respuestas viejas si ya se siguió escribiendo
+        try {
+          const r = await api('/api/direcciones?q=' + encodeURIComponent(q), {}, auth);
+          if (n !== busqueda) return;
+          opciones = r; activa = -1; pintar();
+          if (!r.length) ayuda.textContent = 'Sin sugerencias: revisá la dirección o dejala como la escribiste.';
+        } catch (e) {
+          if (n !== busqueda) return;
+          opciones = []; pintar(); ayuda.textContent = e.message;
+        }
+      }, 300);
+    });
+    dir.addEventListener('keydown', (ev) => {
+      if (lista.hidden) return;
+      if (ev.key === 'ArrowDown') { activa = (activa + 1) % opciones.length; pintar(); ev.preventDefault(); }
+      else if (ev.key === 'ArrowUp') { activa = (activa - 1 + opciones.length) % opciones.length; pintar(); ev.preventDefault(); }
+      else if (ev.key === 'Enter' && activa >= 0) { elegir(activa); ev.preventDefault(); }
+      else if (ev.key === 'Escape') cerrar();
+    });
+    dir.addEventListener('blur', cerrar);
+    // mousedown (y no click) para elegir antes de que el input pierda el foco
+    lista.addEventListener('mousedown', (ev) => {
+      ev.preventDefault();
+      const li = ev.target.closest('li');
+      if (li) elegir(Number(li.dataset.i));
+    });
+
+    // RF-01
+    $('form-charla').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      f.querySelectorAll('.err').forEach(s => s.textContent = '');
+      const dto = Object.fromEntries(new FormData(f));
+      try {
+        await api('/api/charlas', { method: 'POST', body: JSON.stringify(dto) }, auth);
+        f.reset(); ayuda.textContent = AYUDA; mostrar($('charla-msg'), 'Charla publicada', 'ok');
+      } catch (e) {
+        mostrar($('charla-msg'), e.message, 'error');
+        for (const [campo, m] of Object.entries(e.campos)) {
+          const el = f.querySelector(`[name="${campo}"]`)?.parentElement.querySelector('.err');
+          if (el) el.textContent = m;
+        }
+      }
+    });
+
+    // RF-08
+    async function cargarPostulantes() {
+      $('tabla').hidden = true; $('postulantes-msg').className = ''; $('postulantes-msg').textContent = '';
+      try {
+        const lista = await api('/api/postulantes', {}, auth);
+        if (!lista.length) { mostrar($('postulantes-msg'), 'No se detectan inscriptos.', 'info'); return; }
+        $('tabla').hidden = false;
+        $('postulantes').innerHTML = lista.map(p => `<tr>
+          <td>${esc(p.apellido)}, ${esc(p.nombre)}</td><td>${esc(p.distritoElectoral)}</td><td>${esc(p.estado)}</td>
+          <td><button type="button" class="secundario" data-id="${p.id}">Ver</button></td></tr>`).join('');
+      } catch (e) {
+        mostrar($('postulantes-msg'), e.status === 409 ? e.message : 'Esta acción no está disponible por el momento', e.status === 409 ? 'info' : 'error');
+      }
+    }
+
+    $('postulantes').addEventListener('click', async (ev) => {
+      if (ev.target.dataset.id) await verPostulante(ev.target.dataset.id);
+    });
+
+    async function verPostulante(id) {
+      $('detalle-msg').className = ''; $('detalle-msg').textContent = ''; $('motivo').value = '';
+      const p = await api('/api/postulantes/' + id, {}, auth);
+      seleccionado = p.id;
+      const filas = [['Distrito electoral', p.distritoElectoral], ['Nombre', p.nombre], ['Apellido', p.apellido],
+        ['DNI', p.dni], ['Fecha de nacimiento', p.fechaNacimiento], ['Domicilio', p.domicilio], ['Teléfono', p.telefono],
+        ['Correo', p.email], ['Antecedentes de mesa', p.antecedentesMesa ? 'Sí' : 'No'],
+        ['Estado de capacitación', p.estadoCapacitacion], ['Afiliación', p.afiliado ? p.partido : 'No'],
+        ['Estado', p.estado], ['Motivo de rechazo', p.motivoRechazo || '—']];
+      $('datos').innerHTML = filas.map(([k, v]) => `<dt>${esc(k)}</dt><dd>${esc(String(v))}</dd>`).join('');
+      $('acciones').hidden = p.estado !== 'PENDIENTE';
+      $('detalle').hidden = false;
+      $('detalle').scrollIntoView();
+    }
+
+    async function evaluar(accion, cuerpo) {
+      try {
+        await api(`/api/postulantes/${seleccionado}/${accion}`, { method: 'POST', body: JSON.stringify(cuerpo) }, auth);
+        await cargarPostulantes(); await verPostulante(seleccionado);
+        mostrar($('detalle-msg'), accion === 'aprobar' ? 'Postulante aprobado. Se notificará por correo.' : 'Postulante rechazado. Se notificará por correo.', 'ok');
+      } catch (e) { mostrar($('detalle-msg'), e.message, 'error'); }
+    }
+    $('aprobar').addEventListener('click', () => evaluar('aprobar', {}));
+    $('rechazar').addEventListener('click', () => evaluar('rechazar', { motivo: $('motivo').value }));
+  </script>
+</body>
+</html>

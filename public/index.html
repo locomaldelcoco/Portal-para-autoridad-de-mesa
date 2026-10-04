@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portal para Autoridades de Mesa</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Portal para Autoridades de Mesa</h1>
+    <nav><a href="#inscripcion">Inscripción</a><a href="#charlas">Charlas</a><a href="admin.html">Administración</a></nav>
+  </header>
+  <main class="dos-columnas">
+    <section id="inscripcion">
+      <h2>Inscripción como autoridad de mesa</h2>
+      <div id="estado"></div>
+      <form id="form" novalidate hidden>
+        <label>Distrito electoral<select name="distritoElectoral" id="distritos" required></select><span class="err"></span></label>
+        <label>Nombre<input name="nombre" required maxlength="100"><span class="err"></span></label>
+        <label>Apellido<input name="apellido" required maxlength="100"><span class="err"></span></label>
+        <label>DNI (sin puntos)<input name="dni" required inputmode="numeric"><span class="err"></span></label>
+        <label>Fecha de nacimiento<input name="fechaNacimiento" type="date" required><span class="err"></span></label>
+        <label>Domicilio<input name="domicilio" required maxlength="200"><span class="err"></span></label>
+        <label>Teléfono<input name="telefono" type="tel" required maxlength="30"><span class="err"></span></label>
+        <label>Correo electrónico<input name="email" type="email" required><span class="err"></span></label>
+        <label>Estado de capacitación<input name="estadoCapacitacion" required maxlength="100"><span class="err"></span></label>
+        <label class="check"><input type="checkbox" name="antecedentesMesa"> Tengo antecedentes como autoridad de mesa</label>
+        <label class="check"><input type="checkbox" name="afiliado" id="afiliado"> Estoy afiliado a un partido político</label>
+        <label id="fila-partido" hidden>Partido<input name="partido" maxlength="100"><span class="err"></span></label>
+        <label>Charla de interés (opcional)<select name="charlaInteresId" id="charla-interes"><option value="">— Ninguna —</option></select><span class="err"></span></label>
+        <div class="acciones"><button type="submit">Inscribirme</button></div>
+      </form>
+      <div id="resultado" role="status"></div>
+    </section>
+
+    <section id="charlas">
+      <h2>Charlas de orientación</h2>
+      <div id="lista-charlas">Cargando…</div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { api, esc, formatearFechaHora } from './app.js';
+    const $ = (id) => document.getElementById(id);
+
+    // --- RF-02: charlas (+ RNF-01: mapa) ---
+    let charlas = [];
+    try {
+      charlas = await api('/api/charlas');
+      $('lista-charlas').innerHTML = charlas.length ? charlas.map(c => `
+        <article class="charla">
+          <h3>${esc(c.nombre)}</h3>
+          <div class="meta"><strong>Tema:</strong> ${esc(c.tema)}<br>
+            📅 ${esc(formatearFechaHora(c.fecha, c.horario))}<br>
+            📍 ${esc(c.sedeNombre)} — ${esc(c.sedeDireccion)}</div>
+          <button type="button" class="secundario" data-mapa="${c.id}">Ver mapa</button>
+          <div id="mapa-${c.id}"></div>
+        </article>`).join('') : '<p>Todavía no hay charlas publicadas.</p>';
+    } catch (e) {
+      $('lista-charlas').innerHTML = '<div class="msg error">No se pudo mostrar el contenido. Intente nuevamente en otro momento.</div>';
+    }
+    // El mapa se arma con la respuesta de la API de la USIG: se envía la dirección de la sede y se usan las coordenadas devueltas
+    $('lista-charlas').addEventListener('click', async (ev) => {
+      const id = ev.target.dataset.mapa;
+      if (!id) return;
+      const cont = $('mapa-' + id);
+      if (cont.innerHTML) { cont.innerHTML = ''; return; }
+      const c = charlas.find(x => x.id == id);
+      cont.innerHTML = '<p class="meta">Ubicando la sede…</p>';
+      try {
+        const u = await api('/api/ubicacion?direccion=' + encodeURIComponent(c.sedeDireccion));
+        const bbox = [u.lng - 0.004, u.lat - 0.002, u.lng + 0.004, u.lat + 0.002].join(',');
+        cont.innerHTML = `<p class="meta">Dirección normalizada: <strong>${esc(u.direccion)}</strong>${u.localidad ? ', ' + esc(u.localidad) : ''}
+            · <a target="_blank" rel="noopener" href="https://www.openstreetmap.org/?mlat=${u.lat}&mlon=${u.lng}#map=17/${u.lat}/${u.lng}">Agrandar</a></p>
+          <iframe title="Mapa de la sede" loading="lazy"
+            src="https://www.openstreetmap.org/export/embed.html?bbox=${bbox}&layer=mapnik&marker=${u.lat},${u.lng}"></iframe>`;
+      } catch (e) { cont.innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+    });
+
+    // --- RF-03 / RF-04: el formulario solo aparece con la convocatoria abierta ---
+    const form = $('form'), resultado = $('resultado');
+    try {
+      const conv = await api('/api/convocatoria');
+      const fecha = (iso) => new Date(iso).toLocaleDateString('es-AR');
+      const textos = {
+        SIN_CHARLAS: 'La inscripción se habilitará a partir de la fecha de la primera charla.',
+        PROXIMA: `La inscripción se habilitará el ${conv.apertura ? fecha(conv.apertura) : ''}.`,
+        CERRADA: 'La convocatoria está cerrada: ya no se reciben nuevas inscripciones.'
+      };
+      if (conv.estado === 'ABIERTA') {
+        form.hidden = false;
+        $('distritos').innerHTML = (await api('/api/distritos')).map(d => `<option>${esc(d)}</option>`).join('');
+        $('charla-interes').innerHTML += charlas.map(c => `<option value="${c.id}">${esc(c.nombre)}</option>`).join('');
+      } else {
+        $('estado').innerHTML = `<div class="msg info">${esc(textos[conv.estado])}</div>`;
+      }
+    } catch (e) { $('estado').innerHTML = `<div class="msg error">${esc(e.message)}</div>`; }
+
+    $('afiliado').addEventListener('change', (ev) => { $('fila-partido').hidden = !ev.target.checked; });
+
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      form.querySelectorAll('.err').forEach(s => s.textContent = '');
+      resultado.className = ''; resultado.textContent = '';
+      const d = Object.fromEntries(new FormData(form));
+      d.antecedentesMesa = form.antecedentesMesa.checked;
+      d.afiliado = form.afiliado.checked;
+      d.charlaInteresId = d.charlaInteresId ? Number(d.charlaInteresId) : null;
+      if (!d.afiliado) d.partido = null;
+      const boton = form.querySelector('button'); boton.disabled = true;
+      try {
+        await api('/api/postulantes', { method: 'POST', body: JSON.stringify(d) });
+        form.reset(); $('fila-partido').hidden = true;
+        resultado.className = 'msg ok';
+        resultado.textContent = 'Su inscripción fue registrada. Quedó en estado Pendiente de evaluación.';
+      } catch (e) {
+        resultado.className = 'msg error'; resultado.textContent = e.message;
+        for (const [campo, mensaje] of Object.entries(e.campos)) {
+          const el = form.querySelector(`[name="${campo}"]`)?.parentElement.querySelector('.err');
+          if (el) el.textContent = mensaje;
+        }
+      } finally { boton.disabled = false; }
+    });
+  </script>
+</body>
+</html>
