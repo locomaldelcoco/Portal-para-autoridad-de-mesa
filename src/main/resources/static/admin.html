@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Administración — Portal de Autoridades de Mesa</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header><h1>Administración</h1><nav><a href="index.html">← Volver al portal</a></nav></header>
+  <main>
+    <section id="login">
+      <h2>Ingresar</h2>
+      <form id="form-login">
+        <label>Usuario<input name="usuario" required autocomplete="username"></label>
+        <label>Contraseña<input name="clave" type="password" required autocomplete="current-password"></label>
+        <div class="acciones"><button type="submit">Entrar</button></div>
+      </form>
+      <div id="login-msg"></div>
+    </section>
+
+    <div id="panel" hidden>
+      <section>
+        <h2 id="titulo-form">Nueva charla</h2>
+        <form id="form-charla">
+          <label class="ancho">Título<input name="titulo" required maxlength="200"></label>
+          <label>Fecha y hora<input name="fechaHora" type="datetime-local" required></label>
+          <label>Lugar<input name="lugar" required></label>
+          <label>Dirección<input name="direccion" required></label>
+          <label>Localidad<input name="localidad" required></label>
+          <label class="ancho">Descripción<textarea name="descripcion" rows="2" maxlength="2000"></textarea></label>
+          <label class="ancho">Temas (uno por línea)<textarea name="temas" rows="4" required></textarea></label>
+          <div class="acciones"><button type="submit">Guardar</button> <button type="button" class="secundario" id="cancelar" hidden>Cancelar edición</button></div>
+        </form>
+        <div id="charla-msg"></div>
+      </section>
+
+      <section>
+        <h2>Charlas</h2>
+        <div id="admin-charlas"></div>
+      </section>
+
+      <section>
+        <h2>Inscriptos (<span id="total">0</span>)</h2>
+        <div class="scroll"><table>
+          <thead><tr><th>Fecha</th><th>Apellido y nombre</th><th>DNI</th><th>Email</th><th>Teléfono</th><th>Domicilio</th></tr></thead>
+          <tbody id="inscriptos"></tbody>
+        </table></div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    import { api, esc, formatearFecha, basicAuth } from './app.js';
+
+    let auth = null;           // Solo en memoria: se pierde al recargar (más seguro que guardarla)
+    let editandoId = null;
+    let charlas = [];
+
+    const $ = (id) => document.getElementById(id);
+    const mostrar = (el, texto, tipo) => { el.className = 'msg ' + tipo; el.textContent = texto; };
+
+    $('form-login').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      auth = basicAuth(f.usuario.value, f.clave.value);
+      try {
+        await cargarTodo();
+        $('login').hidden = true; $('panel').hidden = false;
+      } catch (e) {
+        auth = null;
+        mostrar($('login-msg'), e.status === 401 ? 'Usuario o contraseña incorrectos' : e.message, 'error');
+      }
+    });
+
+    async function cargarTodo() {
+      const inscriptos = await api('/api/inscripciones', {}, auth); // falla con 401 si las credenciales son malas
+      charlas = await api('/api/charlas?todas=true');
+      $('total').textContent = inscriptos.length;
+      $('inscriptos').innerHTML = inscriptos.map(i => `<tr>
+        <td>${esc(new Date(i.fechaInscripcion).toLocaleDateString('es-AR'))}</td>
+        <td>${esc(i.apellido)}, ${esc(i.nombre)}</td><td>${esc(i.dni)}</td><td>${esc(i.email)}</td>
+        <td>${esc(i.telefono)}</td><td>${esc(i.domicilio)}, ${esc(i.localidad)}</td></tr>`).join('');
+      $('admin-charlas').innerHTML = charlas.map(c => `
+        <div class="charla"><strong>${esc(c.titulo)}</strong>
+          <div class="meta">${esc(formatearFecha(c.fechaHora))} — ${esc(c.lugar)}, ${esc(c.localidad)}</div>
+          <button data-editar="${c.id}" class="secundario">Editar</button>
+          <button data-borrar="${c.id}" class="peligro">Eliminar</button></div>`).join('') || '<p>Sin charlas.</p>';
+    }
+
+    $('admin-charlas').addEventListener('click', async (ev) => {
+      const idEditar = ev.target.dataset.editar, idBorrar = ev.target.dataset.borrar;
+      if (idEditar) {
+        const c = charlas.find(x => x.id == idEditar), f = $('form-charla');
+        for (const k of ['titulo', 'lugar', 'direccion', 'localidad']) f[k].value = c[k];
+        f.descripcion.value = c.descripcion ?? '';
+        f.fechaHora.value = c.fechaHora.slice(0, 16);
+        f.temas.value = c.temas.join('\n');
+        editandoId = c.id; $('titulo-form').textContent = 'Editar charla'; $('cancelar').hidden = false;
+        f.scrollIntoView();
+      }
+      if (idBorrar && confirm('¿Eliminar esta charla?')) {
+        try { await api('/api/charlas/' + idBorrar, { method: 'DELETE' }, auth); await cargarTodo(); }
+        catch (e) { mostrar($('charla-msg'), e.message, 'error'); }
+      }
+    });
+
+    function resetForm() {
+      $('form-charla').reset(); editandoId = null;
+      $('titulo-form').textContent = 'Nueva charla'; $('cancelar').hidden = true;
+    }
+    $('cancelar').addEventListener('click', resetForm);
+
+    $('form-charla').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = ev.target;
+      const dto = {
+        titulo: f.titulo.value, descripcion: f.descripcion.value, fechaHora: f.fechaHora.value,
+        lugar: f.lugar.value, direccion: f.direccion.value, localidad: f.localidad.value,
+        temas: f.temas.value.split('\n').map(t => t.trim()).filter(Boolean)
+      };
+      try {
+        await api(editandoId ? '/api/charlas/' + editandoId : '/api/charlas',
+                  { method: editandoId ? 'PUT' : 'POST', body: JSON.stringify(dto) }, auth);
+        resetForm(); await cargarTodo();
+        mostrar($('charla-msg'), 'Charla guardada', 'ok');
+      } catch (e) { mostrar($('charla-msg'), e.message, 'error'); }
+    });
+  </script>
+</body>
+</html>
