@@ -14,9 +14,9 @@ import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
- * Público: ver charlas, inscribirse y las páginas estáticas.
- * Admin (HTTP Basic): crear/editar/borrar charlas y ver inscriptos.
- * CSRF se desactiva porque la API es stateless y usa Basic Auth enviado por el frontend.
+ * RNF-02: público = ver charlas, estado de la convocatoria, registrarse como postulante.
+ * RNF-03: todo lo demás de /api requiere el rol ADMIN (HTTP Basic).
+ * CSRF desactivado: la API no usa cookies de sesión, solo credenciales Basic.
  */
 @Configuration
 public class SecurityConfig {
@@ -25,8 +25,8 @@ public class SecurityConfig {
     SecurityFilterChain filtros(HttpSecurity http) throws Exception {
         http.csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(a -> a
-                .requestMatchers(HttpMethod.GET, "/api/charlas", "/api/charlas/*").permitAll()
-                .requestMatchers(HttpMethod.POST, "/api/inscripciones").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/charlas", "/api/convocatoria", "/api/distritos").permitAll()
+                .requestMatchers(HttpMethod.POST, "/api/postulantes").permitAll()
                 .requestMatchers("/api/**").hasRole("ADMIN")
                 .anyRequest().permitAll())
             .httpBasic(Customizer.withDefaults());
